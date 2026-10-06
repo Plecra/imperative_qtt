@@ -8,6 +8,10 @@ fn main() {
         "fun foo => fun bar => foo bar",
         // "fun foo : (() -> ()) => fun x : () => foo x",
         "fun foo : () -> () => fun x : () => loop (break (foo x))",
+        "fun foo : Sum () () => case foo of x => x | y => loop break y",
+        "fun foo : Pair () () => fun mkpair : () -> () -> Pair () () =>
+            let [a, b] = foo;
+            mkpair a b",
 
     ];
     for source in sources {

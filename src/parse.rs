@@ -74,6 +74,9 @@ pub fn parse_ty(input: &mut &[u8], errors: &mut Vec<Error>) -> TyNode {
             if !std::mem::replace(&mut bad, true) {
                 errors.push(Error::ExpectedSymbol(b"("));
             }
+            while input.first().is_some_and(|c| c.is_ascii_whitespace() || *c == b'(') {
+                *input = &input[1..];
+            }
             continue;
         }
     };
@@ -115,7 +118,7 @@ pub fn parse_expr<'a>(
                     let body = parse_expr(input, context, skips, unit_ty, errors, 0);
                     context.set(name1, old1);
                     context.set(name2, old2);
-                    Expr::LetPair(Some(unit_ty.clone()), value.rc(), body.rc())
+                    Expr::LetPair(ty, value.rc(), body.rc())
                 }
                 Err(name) => {
                     let old = context.insert(name, *skips + context.len() as u32);
@@ -164,12 +167,14 @@ pub fn parse_expr<'a>(
                 eat(input, b")", errors);
                 expr
             }
-        }else if let Some(v) = try_ident(input) {
-            println!("{context:?}");
+        } else if let Some(v) = try_ident(input) {
             Expr::Var((*skips + context.len() as u32 - 1) - *context.get(v).expect("Variable not in scope"))
         } else {
             if !std::mem::replace(&mut bad, true) {
                 errors.push(Error::ExpectedSymbol(b"let"));
+            }
+            while input.first().is_some_and(|c| c.is_ascii_whitespace() || *c == b'(') {
+                *input = &input[1..];
             }
             continue;
         }
@@ -183,8 +188,10 @@ pub fn parse_expr<'a>(
             let rhs = parse_expr(input, context, skips, unit_ty, errors, 0);
             *skips -= 1;
             atom = Expr::Let(Some(unit_ty.clone()), atom.rc(), rhs.rc());
-        } else if input.first().is_some_and(|v| *v == b'(' || v.is_ascii_alphanumeric()) {
-            let rhs = parse_expr(input, context, skips, unit_ty, errors, 2);
+        } else if prec < 3 && input.first().is_some_and(|v| *v == b'(' || v.is_ascii_alphanumeric()
+            
+        ) && !input.starts_with(b"of") {
+            let rhs = parse_expr(input, context, skips, unit_ty, errors, 3);
             atom = Expr::App(atom.rc(), rhs.rc());
         } else {
             break;
