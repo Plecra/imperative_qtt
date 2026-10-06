@@ -167,7 +167,10 @@ pub fn infer(st: &mut InferState, unit: &TyRef, expr: &ExprNode) -> Exits {
                 .take(Target::Value)
                 .map(|(t, u)| match &*t.0 {
                     Ty::Pair(l, r) => (l.clone(), r.clone(), u),
-                    _ => (unit.clone(), unit.clone(), u),
+                    _ => {
+                        st.errors.push(InferError::TypeMismatch);
+                        (unit.clone(), unit.clone(), u)
+                    },
                 })
                 .unwrap_or_else(|| (unit.clone(), unit.clone(), Usage::new()));
 
@@ -207,8 +210,11 @@ pub fn infer(st: &mut InferState, unit: &TyRef, expr: &ExprNode) -> Exits {
             let mut scrutinee_exits = infer(st, unit, &scrutinee.0);
             let (lty, rty, usage) = match scrutinee_exits.take(Target::Value) {
                 Some((ty, usage)) => match &*ty.0 {
-                    Ty::Pair(l, r) => (l.clone(), r.clone(), usage),
-                    _ => (unit.clone(), unit.clone(), usage),
+                    Ty::Sum(l, r) => (l.clone(), r.clone(), usage),
+                    _ => {
+                        st.errors.push(InferError::TypeMismatch);
+                        (unit.clone(), unit.clone(), usage)
+                    },
                 },
                 None => (unit.clone(), unit.clone(), Usage::new()),
             };
@@ -216,9 +222,37 @@ pub fn infer(st: &mut InferState, unit: &TyRef, expr: &ExprNode) -> Exits {
             st.locals.push(lty);
             let mut l_exits = infer(st, unit, &l.0);
             st.locals.pop();
+            
+            let n = st.locals.len() as u32;
+            let mult = l_exits
+                .0
+                .values_mut()
+                .map(|(_, u)| u.0.remove(&n))
+                .reduce(|a, x| a.join(x, st))
+                .unwrap_or(Mult::ZERO);
+            match mult {
+                // The Drop+Copy insertions can also mean that we're using extra lifetimes.
+                Mult::ZERO | Mult::MAX_ONE => todo!("vty must be drop"),
+                Mult::ONE => (),
+                Mult::MANY => todo!("vty must be copy"),
+            }
             st.locals.push(rty);
             let mut r_exits = infer(st, unit, &r.0);
             st.locals.pop();
+            
+            let n = st.locals.len() as u32;
+            let mult = r_exits
+                .0
+                .values_mut()
+                .map(|(_, u)| u.0.remove(&n))
+                .reduce(|a, x| a.join(x, st))
+                .unwrap_or(Mult::ZERO);
+            match mult {
+                // The Drop+Copy insertions can also mean that we're using extra lifetimes.
+                Mult::ZERO | Mult::MAX_ONE => todo!("vty must be drop"),
+                Mult::ONE => (),
+                Mult::MANY => todo!("vty must be copy"),
+            }
 
             l_exits.0.iter_mut().for_each(|(_, u)| u.1.add(&usage));
             r_exits.0.iter_mut().for_each(|(_, u)| u.1.add(&usage));
