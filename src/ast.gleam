@@ -45,10 +45,12 @@ pub type Pat {
   Right
 }
 
-pub type JumpName {
-  Break
-  Continue
-}
+pub const break_jump_offset: Int = 0
+
+pub const continue_jump_offset: Int = 1
+
+pub type JumpName =
+  Int
 
 // We can consider adding a 'tap' multiplicity: This type-preserving updates a binder
 // and is fundamentally pretty mutable. It's "between" 1 and 0, and makes ordering important.

@@ -202,6 +202,8 @@ fn parse_expr_tail(
   }
 }
 
+const default_loop_label: BitArray = <<"__default_loop_label":utf8>>
+
 fn parse_expr(
   cx: Context,
   r: BitArray,
@@ -248,13 +250,22 @@ fn parse_expr(
         r,
       ))
     }
-    <<"break":utf8, r:bytes>> -> {
-      use #(e, r) <- try(parse_expr(cx, trim_start(r), apply))
-      Ok(#(ast.Jump(ast.Break, e), r))
-    }
-    <<"continue":utf8, r:bytes>> -> {
-      use #(e, r) <- try(parse_expr(cx, trim_start(r), apply))
-      Ok(#(ast.Jump(ast.Continue, e), r))
+    <<"break":utf8, r2:bytes>> | <<"continue":utf8, r2:bytes>> -> {
+      let offset = case bit_array.starts_with(r, <<"break":utf8>>) {
+        True -> ast.break_jump_offset
+        False -> ast.continue_jump_offset
+      }
+      let r = trim_start(r2)
+      use #(name, r) <- try(case strip_prefix(<<":":utf8>>, r) {
+        Ok(r) -> ident(r)
+        Error(Nil) -> Ok(#(default_loop_label, r))
+      })
+      use #(e, r) <- try(parse_expr(cx, r, apply))
+      use n <- try(
+        dict.get(cx.0, name)
+        |> result.map_error(fn(_) { UndefinedVariable(name, r) }),
+      )
+      Ok(#(ast.Jump({ { cx.1 - 1 } - n } + offset, e), r))
     }
     <<"fun":utf8, r:bytes>> -> {
       use #(param, r) <- try(ident(trim_start(r)))
@@ -266,15 +277,27 @@ fn parse_expr(
       Ok(#(ast.Lam(typ, body), r))
     }
     <<"loop":utf8, r:bytes>> -> {
+      let r = trim_start(r)
+      use #(loopname, r) <- try(case strip_prefix(<<":":utf8>>, r) {
+        Ok(r) -> ident(r)
+        Error(Nil) -> Ok(#(default_loop_label, r))
+      })
       use #(n, r) <- try(ident(trim_start(r)))
       use #(_, r) <- try(eat(<<"from">>)(r))
       use #(e, r) <- try(parse_expr(cx, r, semi))
       use #(_, r) <- try(eat(<<"in">>)(r))
+      let loopidx = cx.1 + 1
+      let cx = #(
+        cx.0
+          |> dict.insert(loopname, loopidx)
+          |> dict.insert(default_loop_label, loopidx),
+        cx.1 + 2,
+      )
       use #(body, r) <- try(parse_expr(with(cx, n), r, apply))
       Ok(#(ast.Loop(e, body), r))
     }
     <<"(":utf8, r:bytes>> -> {
-      use #(e, r) <- try(parse_expr(cx, r, semi))
+      use #(e, r) <- try(parse_expr(cx, trim_start(r), semi))
       use #(_, r) <- try(eat(<<")">>)(r))
       Ok(#(e, r))
     }

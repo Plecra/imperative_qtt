@@ -140,8 +140,13 @@ fn print_error(
       })
     }
     ast.Loop(init, body) -> {
-      let name = <<"x":utf8, digits(iv.size(names)):bits>>
-      io.print("loop ")
+      let loopname = <<"x":utf8, digits(iv.size(names)):bits>>
+      let name = <<"x":utf8, digits(iv.size(names) + 2):bits>>
+      io.print("loop :")
+      io.print(
+        bit_array.to_string(loopname) |> result.lazy_unwrap(fn() { panic }),
+      )
+      io.print(" ")
       io.print(bit_array.to_string(name) |> result.lazy_unwrap(fn() { panic }))
       io.print(" from ")
       let _ =
@@ -151,10 +156,20 @@ fn print_error(
         })
       io.print(" in\n")
       io.print(string.repeat(" ", depth + indent))
-      print_error(iv.append(names, name), body, depth + indent, case loc {
-        Ok(infer.Child(1, l)) -> Ok(l)
-        _ -> Error(Nil)
-      })
+      print_error(
+        iv.append(
+          names
+            |> iv.append(<<"continue :":utf8, loopname:bits, " ":utf8>>)
+            |> iv.append(<<"break :":utf8, loopname:bits, " ":utf8>>),
+          name,
+        ),
+        body,
+        depth + indent,
+        case loc {
+          Ok(infer.Child(1, l)) -> Ok(l)
+          _ -> Error(Nil)
+        },
+      )
     }
     ast.Case(scrutinee, branches) -> {
       case list.length(branches) {
@@ -257,10 +272,13 @@ fn print_error(
       }
     }
     ast.Jump(target, e) -> {
-      case target {
-        ast.Break -> io.print("break ")
-        ast.Continue -> io.print("continue ")
-      }
+      io.print(
+        bit_array.to_string(
+          iv.get(names, iv.size(names) - 1 - target)
+          |> result.lazy_unwrap(fn() { panic }),
+        )
+        |> result.lazy_unwrap(fn() { panic }),
+      )
       print_error(names, e, depth + indent, case loc {
         Ok(infer.Child(0, l)) -> Ok(l)
         _ -> Error(Nil)
@@ -311,8 +329,6 @@ pub fn main() -> Nil {
           }
           Error(#(e, loc)) -> {
             echo e
-            // echo expr
-            // echo loc
             print_error(iv.new(), expr, 0, Ok(loc))
             io.println("")
             Error(Nil)

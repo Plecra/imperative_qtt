@@ -1,7 +1,7 @@
 // import gleam/bool
 import ast.{
-  type Expr, type JumpName, type Pat, type Type, Bind, Break, Cons, Continue,
-  Fun, Left, Never, Pair, Right, Sum, Unit,
+  type Expr, type JumpName, type Pat, type Type, Bind, Cons, Fun, Left, Never,
+  Pair, Right, Sum, Unit,
 }
 import dictex.{type Maybe}
 import gleam/bool
@@ -185,20 +185,26 @@ pub fn infer(cx: Context, e: Expr) -> Result(Exits, Issue) {
       Ok(entries([#(Value, #(ty, entries([#(level, One)])))]))
     }
     ast.Jump(name, e) -> {
+      let level = dict.size(cx) - 1 - name
       use exits <- try(infer(cx, e) |> at(0))
-      let #(a, b) = #(exits |> dict.get(Value), exits |> dict.get(Named(name)))
+      let #(a, b) = #(exits |> dict.get(Value), exits |> dict.get(Named(level)))
       use paths <- try(join_opt_exit(a, b))
-      Ok(exits |> dict.delete(Value) |> dictex.set(Named(name), paths))
+      Ok(exits |> dict.delete(Value) |> dictex.set(Named(level), paths))
     }
     ast.Loop(init, body) -> {
       use init_exits <- try(infer(cx, init) |> at(0))
       let init = dict.get(init_exits, Value)
       let #(ty, init_u) = init |> res.unwrap(#(Never, entries([])))
 
-      use exits <- try(with_bind(cx, ty, fn(cx) { infer(cx, body) |> at(1) }))
+      // insert the loop labels into the context. The context wont actually be used, we're just relying on
+      // this for variable numbering.
+      let continue = dict.size(cx) + 1 - ast.continue_jump_offset
+      let break = dict.size(cx) + 1 - ast.break_jump_offset
+      let lcx = with_var(with_var(cx, Unit), Unit)
+      use exits <- try(with_bind(lcx, ty, fn(cx) { infer(cx, body) |> at(1) }))
       use acc <- try(join_opt_exit(
         dict.get(exits, Value),
-        dict.get(exits, Named(Continue)),
+        dict.get(exits, Named(continue)),
       ))
       let reentry_env = acc |> res.map(fn(x) { #(x.0, seq(init_u, many(x.1))) })
       use entry_env <- try(join_opt_exit(init, reentry_env))
@@ -207,9 +213,9 @@ pub fn infer(cx: Context, e: Expr) -> Result(Exits, Issue) {
 
       let exits =
         exits
-        |> dict.delete(Named(Continue))
-        |> dict.delete(Named(Break))
-        |> dictex.set(Value, dict.get(exits, Named(Break)))
+        |> dict.delete(Named(continue))
+        |> dict.delete(Named(break))
+        |> dictex.set(Value, dict.get(exits, Named(break)))
         // All the exits of the body come after an entry
         |> dict.map_values(fn(_, s) { #(s.0, seq(entry_u, s.1)) })
 
