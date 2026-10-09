@@ -1,0 +1,15 @@
+fun unit : Unit =>
+fun true : Sum Unit Unit =>
+fun false : Sum Unit Unit =>
+fun mkpair : Unit -> Unit -> Pair Unit Unit =>
+// fun y : OutPointer =>
+fun z : OutPointer -> Pair Unit Unit =>
+fun x : Unit =>
+    loop v from unit in
+        // currently, this is "broken" because the type checker
+        // detects that it is not used on infinite paths:
+        // so we're leaking it and its not respecting non-weakening
+        letpair t, u = mkpair unit unit;
+        case true of
+        | _ => break u
+        | _ => break true
