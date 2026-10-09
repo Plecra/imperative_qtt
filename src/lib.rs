@@ -11,7 +11,7 @@ pub fn infer(expr: &ast::ExprNode) -> (infer::Exits, Vec<InferError>) {
         errors: Vec::new(),
     };
     let unit_ty = ast::Ty::Unit.rc();
-    (infer::infer(&mut st, &unit_ty, expr), st.errors)
+    (infer::infer(&mut st, &unit_ty, expr, None), st.errors)
 }
 
 

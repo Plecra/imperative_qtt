@@ -1,4 +1,4 @@
-use crate::ast::{Expr, ExprNode, ExprRef, Ty, TyMult, TyNode, TyRef};
+use crate::ast::{Expr, ExprNode, Ty, TyMult, TyNode, TyRef};
 pub enum Error {
     ExpectedIdentifier,
     ExpectedSymbol(&'static [u8]),
