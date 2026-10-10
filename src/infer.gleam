@@ -19,8 +19,9 @@ pub type Target {
 type Context =
   Dict(Int, Type)
 
-fn with_var(context: Context, ty: Type) -> Context {
-  dict.insert(context, dict.size(context), ty)
+fn with_var(context: Context, ty: Type) -> #(Int, Context) {
+  let n = dict.size(context)
+  #(n, dict.insert(context, n, ty))
 }
 
 fn var(cx: Context, i: Int) -> Result(#(Int, Type), Issue) {
@@ -118,11 +119,12 @@ fn uses_of_bind(
   ty: Type,
   f: fn(Context) -> Result(Exits, a),
 ) -> Result(#(Exits, Maybe(Mult)), a) {
-  use v <- try(f(cx |> with_var(ty)))
+  let #(n, cx) = cx |> with_var(ty)
+  use v <- try(f(cx))
   Ok(#(
-    dict.map_values(v, fn(_, s) { #(s.0, dict.delete(s.1, dict.size(cx))) }),
+    dict.map_values(v, fn(_, s) { #(s.0, dict.delete(s.1, n)) }),
     dict.values(v)
-      |> list.map(fn(s) { dict.get(s.1, dict.size(cx)) })
+      |> list.map(fn(s) { dict.get(s.1, n) })
       |> list.reduce(join_mult)
       |> res.unwrap(dictex.missing),
   ))
@@ -167,8 +169,8 @@ fn check(cx: Context, e: Expr, at: Target, ret: Type) -> Result(Exits, Issue) {
 }
 
 // A lightweight method for keeping enough error location information in the AST.
-// I'd recommend using expression identities instead, but that would make the gleam
-// code much noisier.
+// I'd recommend using expression identities (`ptr_eq`) instead, but that would
+// make the gleam code much noisier.
 pub type Loc {
   Here
   Child(Int, Loc)
@@ -198,10 +200,9 @@ pub fn infer(cx: Context, e: Expr) -> Result(Exits, Issue) {
 
       // insert the loop labels into the context. The context wont actually be used, we're just relying on
       // this for variable numbering.
-      let continue = dict.size(cx) + 1 - ast.continue_jump_offset
-      let break = dict.size(cx) + 1 - ast.break_jump_offset
-      let lcx = with_var(with_var(cx, Unit), Unit)
-      use exits <- try(with_bind(lcx, ty, fn(cx) { infer(cx, body) |> at(1) }))
+      let #(continue, cx) = cx |> with_var(Unit)
+      let #(break, cx) = cx |> with_var(Unit)
+      use exits <- try(cx |> with_bind(ty, fn(cx) { infer(cx, body) |> at(1) }))
       use acc <- try(join_opt_exit(
         dict.get(exits, Value),
         dict.get(exits, Named(continue)),
@@ -257,7 +258,7 @@ pub fn infer(cx: Context, e: Expr) -> Result(Exits, Issue) {
       case usage {
         None -> Ok(a_exits)
         Some(rets) -> {
-          let val = b_exits |> dict.get(Value) |> res.map(fn(x) { #(ret, x.1) })
+          let val = dict.get(b_exits, Value) |> res.map(fn(x) { #(ret, x.1) })
           dictex.set(b_exits, Value, val)
           |> after(rets, dict.delete(a_exits, Value))
         }
@@ -265,9 +266,9 @@ pub fn infer(cx: Context, e: Expr) -> Result(Exits, Issue) {
     }
     ast.Case(scrutinee, cases) -> {
       use exits <- try(infer(cx, scrutinee) |> at(0))
-      let #(ty, usage) =
-        dict.get(exits, Value) |> res.unwrap(#(Never, entries([])))
-      use case_usage <- try(
+      let val = dict.get(exits, Value)
+      let ty = val |> res.map(fn(x) { x.0 }) |> res.unwrap(Never)
+      use case_exits <- try(
         list.index_map(cases, fn(c, i) { #(c, i) })
         |> list.try_fold(entries([]), fn(exits, c) {
           let #(#(pat, body), i) = c
@@ -285,10 +286,11 @@ pub fn infer(cx: Context, e: Expr) -> Result(Exits, Issue) {
       // We could make this more precise by sequencing *before* joining, inside
       // the fold. It's unclear whether that enables anything important - those
       // sequence calls dont have to deal with a lossy subtyping relation though.
-      let res_usage = after(case_usage, usage, dict.delete(exits, Value))
-      case dict.has_key(exits, Value) {
-        True -> res_usage
-        False -> Ok(exits)
+      // (On further thought, this ordering ensures the behaviour is more reliable for
+      //  moving expressions in + out of the scrutinee, out to binders)
+      case val {
+        Error(Nil) -> Ok(exits)
+        Ok(#(_, usage)) -> after(case_exits, usage, dict.delete(exits, Value))
       }
     }
   }
